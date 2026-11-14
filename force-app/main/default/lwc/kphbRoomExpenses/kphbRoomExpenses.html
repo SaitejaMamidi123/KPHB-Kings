@@ -1,0 +1,288 @@
+<template>
+    <lightning-card class="app-card">
+        <div class="header-banner">
+            <div>
+                <p class="eyebrow">ROOMMATE EXPENSE TRACKER</p>
+                <h1>Welcome to KPHB Kings</h1>
+                <p class="subtitle">Shared expenses, clearly split.</p>
+            </div>
+            <div class="header-actions">
+                <div class="month-picker"><lightning-combobox label="Expense month" value={selectedMonth} options={monthOptions} onchange={handleMonthChange}></lightning-combobox></div>
+                <lightning-button-icon icon-name="utility:refresh" alternative-text="Refresh dashboard" title="Refresh dashboard" onclick={handleRefresh} disabled={isLoading}></lightning-button-icon>
+                <lightning-button variant="brand" label="+ Add Expense" onclick={openExpenseModal}></lightning-button>
+            </div>
+        </div>
+
+        <template if:true={isLoading}>
+            <lightning-spinner alternative-text="Loading room expenses"></lightning-spinner>
+        </template>
+        <template if:true={errorMessage}>
+            <div class="error-box" role="alert">{errorMessage}</div>
+        </template>
+
+        <lightning-tabset active-tab-value="my-expenses">
+            <lightning-tab label="My Expenses" value="my-expenses">
+                <div class="content-grid my-expenses-grid">
+                    <section class="panel chart-panel">
+                        <div class="section-heading">
+                            <div><h2>My spending</h2><p>By expense label</p></div>
+                            <span class="total-pill my-spending-total">{myTotalFormatted}</span>
+                        </div>
+                        <div class="chart-layout">
+                            <div class="pie-chart" style={myPieStyle} role="img" aria-label="Pie chart of my spending by label"></div>
+                            <div class="legend-list">
+                                <template for:each={myChartItems} for:item="item">
+                                    <div class="legend-row" key={item.label}>
+                                        <span class="legend-dot" style={item.dotStyle}></span>
+                                        <span>{item.label}</span><strong>{item.amountFormatted}</strong>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section class="panel expense-list-panel">
+                        <div class="section-heading">
+                            <div><h2>My expenses</h2><p>All expenses you have added</p></div>
+                            <span class="count-pill">{myExpenses.length}</span>
+                        </div>
+                        <template if:true={hasMyExpenses}>
+                            <div class="expense-list">
+                                <template for:each={myExpenses} for:item="expense">
+                                    <article class="expense-row" key={expense.id}>
+                                        <div class="expense-icon">{expense.initial}</div>
+                                        <div class="expense-copy"><strong>{expense.name}</strong><span>{expense.label} · {expense.dateLabel}</span></div>
+                                        <strong class="amount">{expense.amountFormatted}</strong>
+                                        <template if:true={expense.canEdit}>
+                                            <div class="expense-actions">
+                                                <lightning-button-icon icon-name="utility:edit" alternative-text="Edit expense" title="Edit expense" data-id={expense.id} onclick={handleEditExpense} disabled={isSaving}></lightning-button-icon>
+                                                <lightning-button-icon icon-name="utility:delete" alternative-text="Delete expense" title="Delete expense" data-id={expense.id} onclick={handleDeleteExpense} disabled={isSaving}></lightning-button-icon>
+                                            </div>
+                                        </template>
+                                        <template if:false={expense.canEdit}><span class="locked-pill">Locked</span></template>
+                                    </article>
+                                </template>
+                            </div>
+                        </template>
+                        <template if:false={hasMyExpenses}><div class="empty-note">No expenses yet. Add the first one.</div></template>
+                    </section>
+                </div>
+            </lightning-tab>
+
+            <lightning-tab label="Everyone" value="everyone">
+                <div class="content-grid">
+                    <section class="panel chart-panel">
+                        <div class="section-heading">
+                            <div><h2>Group spending</h2><p>Expense split · {memberCount} roommates</p></div>
+                            <span class="total-pill">{groupTotalFormatted}</span>
+                        </div>
+                        <template if:true={hasMembers}>
+                            <div class="chart-layout">
+                                <div class="pie-chart" style={groupPieStyle} role="img" aria-label="Pie chart of group spending by label"></div>
+                                <div class="legend-list">
+                                    <template for:each={groupChartItems} for:item="item">
+                                        <div class="legend-row" key={item.label}>
+                                            <span class="legend-dot" style={item.dotStyle}></span>
+                                            <span>{item.label}</span><strong>{item.amountFormatted}</strong>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                        <template if:false={hasMembers}><div class="empty-note">No members are selected for the split.</div></template>
+                    </section>
+
+                    <section class="panel calculation-panel">
+                        <div class="section-heading"><div><h2>Monthly calculation</h2><p>Estimated shares for this month</p></div></div>
+                        <div class="calculation-lines">
+                            <div><span>Expenses shared</span><strong>{groupTotalFormatted}</strong></div>
+                            <div><span>Expense split</span><strong>{memberCount} roommates</strong></div>
+                            <div class="calculation-result"><span>Expense share each</span><strong>{expenseShareFormatted}</strong></div>
+                            <div><span>Monthly rent</span><strong>{rentFormatted}</strong></div>
+                            <div><span>Rent split</span><strong>{rentMemberCount} roommates</strong></div>
+                            <div class="calculation-result"><span>Rent share each</span><strong>{rentShareFormatted}</strong></div>
+                            <div class="calculation-total"><span>Estimated contribution</span><strong>{estimatedContributionFormatted}</strong></div>
+                        </div>
+                        <p class="formula-note">Estimate only: expense share + rent share. Final amounts below use actual shared expenses, each roommate’s participation settings, and their recorded spending.</p>
+                    </section>
+
+                    <section class="panel split-panel wide-panel">
+                        <div class="section-heading"><div><h2>Rent and expenses</h2><p>Shares, recorded spending, and the final amount to pay</p></div><span class="rent-pill">Monthly rent {rentFormatted}</span></div>
+                        <div class="responsive-table">
+                            <table class="data-table settlement-table">
+                                <thead><tr><th>Roommate</th><th class="numeric">Rent share</th><th class="numeric">Expense share</th><th class="numeric">You spent</th><th class="numeric final-column">Final amount</th></tr></thead>
+                                <tbody>
+                                    <template for:each={personTotals} for:item="person">
+                                        <tr key={person.userId}>
+                                            <td>{person.name}</td><td class="numeric">{person.rentShareFormatted}</td>
+                                            <td class="numeric"><span class="equation-operator">+</span>{person.fairShareFormatted}</td>
+                                            <td class="numeric"><span class="equation-operator">−</span>{person.spentFormatted}</td>
+                                            <td class={person.finalToPayCssClass}><span class="equation-operator">=</span>{person.finalToPayFormatted}
+                                                <template if:true={person.canPay}>
+                                                    <div class="pay-action"><lightning-button variant="brand" label="Pay with QR" icon-name="utility:moneybag" onclick={handlePayAmount}></lightning-button></div>
+                                                </template>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                    <template if:false={hasSettlementMembers}><tr><td colspan="5" class="empty-cell">Select roommates for rent or expense sharing in Admin settings.</td></tr></template>
+                                </tbody>
+                            </table>
+                        </div>
+                        <p class="formula-note">Final amount = rent share + your expense share (if included) − your recorded spending. Spending is credited even when a roommate is excluded from the shared expense split. A negative amount means they should receive the difference.</p>
+                    </section>
+                </div>
+            </lightning-tab>
+
+            <lightning-tab label="Sheet" value="sheet">
+                <section class="panel sheet-panel">
+                    <div class="section-heading"><div><h2>Expense sheet</h2><p>Every roommate has a column; recorded spending is shown even when they are not in the shared expense split.</p></div><span class="total-pill">{sheetTotalFormatted}</span></div>
+                    <template if:true={hasSheetMembers}>
+                        <div class="sheet-scroll">
+                            <table class="sheet-table">
+                                <thead><tr><template for:each={sheetMembers} for:item="member"><th key={member.id}>{member.name}</th></template></tr></thead>
+                                <tbody>
+                                    <template for:each={sheetRows} for:item="row">
+                                        <tr key={row.key}><template for:each={row.cells} for:item="cell"><td key={cell.key}>{cell.value}</td></template></tr>
+                                    </template>
+                                    <tr class="sheet-total"><template for:each={sheetTotals} for:item="total"><td key={total.key}>Total: {total.amountFormatted}</td></template></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                    <template if:false={hasSheetMembers}><div class="empty-note">No members are available for the sheet.</div></template>
+                </section>
+            </lightning-tab>
+
+            <template if:true={isAdmin}>
+                <lightning-tab label="Admin" value="admin">
+                    <div class="admin-top-grid">
+                    <section class="panel admin-panel">
+                        <div class="section-heading"><div><h2>Group settings</h2><p>Choose who shares rent and who shares other expenses</p></div></div>
+                        <div class="rent-editor">
+                            <lightning-input type="number" label="Monthly rent" value={rentInput} min="0" step="0.01" onchange={handleRentChange}></lightning-input>
+                            <div class="upi-editor">
+                                <lightning-input class="upi-input" type={upiInputType} label="Payee UPI ID" value={upiInput} placeholder="name@bank" autocomplete="off" field-level-help="Roommates pay their final amount to this UPI ID using the Pay with PhonePe button." onchange={handleUpiChange}></lightning-input>
+                                <lightning-button-icon class="upi-toggle" icon-name={upiToggleIcon} alternative-text={upiToggleLabel} title={upiToggleLabel} onclick={handleToggleUpiVisibility}></lightning-button-icon>
+                            </div>
+                        </div>
+                        <div class="admin-list">
+                            <template for:each={adminMembers} for:item="member">
+                                <div class="admin-member" key={member.id}>
+                                    <div class="member-avatar">{member.initial}</div>
+                                    <div class="member-name">{member.name}</div>
+                                    <div class="member-split-options">
+                                        <lightning-input type="checkbox" label="Rent" checked={member.includeRent} data-id={member.id} data-setting="includeRent" onchange={handleMemberToggle}></lightning-input>
+                                        <lightning-input type="checkbox" label="Other expenses" checked={member.includeExpenses} data-id={member.id} data-setting="includeExpenses" onchange={handleMemberToggle}></lightning-input>
+                                    </div>
+                                </div>
+                            </template>
+                            <template if:false={hasAdminMembers}><div class="empty-note">No roommates have opened the app yet. Each person appears here after their first visit.</div></template>
+                        </div>
+                        <div class="admin-footer"><p>{adminSaveMessage}</p><lightning-button variant="brand" label="Save settings" onclick={saveAdminSettings} disabled={isSaving}></lightning-button></div>
+                    </section>
+                    <section class="panel report-panel">
+                        <div class="section-heading"><div><h2>Send monthly report</h2><p>Select the current month or any month with report data.</p></div></div>
+                        <lightning-combobox
+                            class="report-month-picker"
+                            label="Report month"
+                            value={reportMonth}
+                            options={monthOptions}
+                            onchange={handleReportMonthChange}>
+                        </lightning-combobox>
+                        <div class="report-highlight">
+                            <strong>{reportMonthLabel}</strong>
+                            <span>Personal spending chart, Everyone summary, and shared expense sheet</span>
+                        </div>
+                        <p class="formula-note">The report is sent to each linked Salesforce User’s email address. Completed months are locked automatically.</p>
+                        <div class="report-footer">
+                            <p>{reportMessage}</p>
+                            <lightning-button variant="brand" label={reportButtonLabel} icon-name="utility:email" onclick={handleSendReport} disabled={isSendingReport}></lightning-button>
+                        </div>
+                    </section>
+                    </div>
+                    <section class="panel admin-expenses-panel">
+                        <div class="section-heading">
+                            <div><h2>Manage expenses</h2><p>Filter expenses by month, roommate, and label. Admins can edit or delete entries in the current month.</p></div>
+                            <span class="count-pill">{adminExpenses.length}</span>
+                        </div>
+                        <div class="admin-expense-filters">
+                            <lightning-combobox label="Month" value={adminExpenseMonth} options={monthOptions} onchange={handleAdminExpenseMonthChange}></lightning-combobox>
+                            <lightning-combobox label="Roommate" value={adminExpenseMember} options={adminExpenseMemberOptions} onchange={handleAdminExpenseMemberChange}></lightning-combobox>
+                            <lightning-combobox label="Label" value={adminExpenseLabel} options={adminExpenseLabelOptions} onchange={handleAdminExpenseLabelChange}></lightning-combobox>
+                            <lightning-button label="Clear filters" onclick={handleResetAdminExpenseFilters} disabled={isLoadingAdminExpenses}></lightning-button>
+                        </div>
+                        <template if:true={isLoadingAdminExpenses}>
+                            <lightning-spinner alternative-text="Loading filtered expenses" size="small"></lightning-spinner>
+                        </template>
+                        <template if:true={hasAdminExpenseError}><div class="error-box" role="alert">{adminExpenseError}</div></template>
+                        <template if:true={hasAdminExpenses}>
+                            <div class="responsive-table">
+                                <table class="data-table">
+                                    <thead><tr><th>Expense</th><th>Roommate</th><th>Label</th><th>Date</th><th class="numeric">Amount</th><th>Actions</th></tr></thead>
+                                    <tbody>
+                                        <template for:each={adminExpenses} for:item="expense">
+                                            <tr key={expense.id}>
+                                                <td>{expense.name}</td><td>{expense.spenderName}</td><td>{expense.label}</td><td>{expense.dateLabel}</td>
+                                                <td class="numeric">{expense.amountFormatted}</td>
+                                                <td class="expense-actions-cell">
+                                                    <template if:true={expense.canEdit}>
+                                                        <lightning-button-icon icon-name="utility:edit" alternative-text="Edit expense" title="Edit expense" data-id={expense.id} onclick={handleEditExpense} disabled={isSaving}></lightning-button-icon>
+                                                        <lightning-button-icon icon-name="utility:delete" alternative-text="Delete expense" title="Delete expense" data-id={expense.id} onclick={handleDeleteExpense} disabled={isSaving}></lightning-button-icon>
+                                                    </template>
+                                                    <template if:false={expense.canEdit}><span class="locked-pill">Month locked</span></template>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </template>
+                        <template if:false={hasAdminExpenses}><div class="empty-note">No expenses match these filters for the selected month.</div></template>
+                    </section>
+                </lightning-tab>
+            </template>
+        </lightning-tabset>
+    </lightning-card>
+
+    <template if:true={showPayModal}>
+        <section role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="pay-modal-title" class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container modal-container">
+                <header class="slds-modal__header"><lightning-button-icon icon-name="utility:close" alternative-text="Close" variant="bare" class="slds-modal__close" onclick={closePayModal}></lightning-button-icon><h2 id="pay-modal-title" class="slds-text-heading_medium">Pay {payAmountLabel}</h2><p class="modal-subtitle">Scan this QR code with PhonePe to pay with the amount filled in.</p></header>
+                <div class="slds-modal__content slds-p-around_medium pay-modal-body">
+                    <template if:true={qrDataUrl}>
+                        <img class="pay-qr" src={qrDataUrl} alt="UPI payment QR code" />
+                    </template>
+                    <template if:false={qrDataUrl}>
+                        <template if:false={qrError}><p class="modal-subtitle">Creating QR code...</p></template>
+                    </template>
+                    <template if:true={qrError}><p class="pay-qr-error">{qrError}</p></template>
+                    <div class="pay-actions">
+                        <lightning-button icon-name="utility:download" label="Save QR" onclick={handleSaveQr} disabled={saveQrDisabled}></lightning-button>
+                        <lightning-button variant="brand" label="Open PhonePe" onclick={handleOpenPhonePe}></lightning-button>
+                        <lightning-button label="Close" onclick={closePayModal}></lightning-button>
+                    </div>
+                    <ol class="pay-steps">
+                        <li>On another device: open PhonePe on your phone and tap <strong>Scan</strong>.</li>
+                        <li>On this phone: tap <strong>Save QR</strong>, open PhonePe, tap <strong>Scan</strong> and pick the saved image from your gallery.</li>
+                    </ol>
+                </div>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+
+    <template if:true={showExpenseModal}>
+        <section role="dialog" tabindex="-1" aria-modal="true" aria-labelledby="expense-modal-title" class="slds-modal slds-fade-in-open">
+            <div class="slds-modal__container modal-container">
+                <header class="slds-modal__header"><lightning-button-icon icon-name="utility:close" alternative-text="Close" variant="bare" class="slds-modal__close" onclick={closeExpenseModal}></lightning-button-icon><h2 id="expense-modal-title" class="slds-text-heading_medium">{expenseModalTitle}</h2><p class="modal-subtitle">New expenses are recorded in the current month under your name.</p></header>
+                <div class="slds-modal__content slds-p-around_medium modal-body">
+                    <lightning-combobox label="Label" value={newExpense.label} options={labelOptions} onchange={handleExpenseLabelChange} required></lightning-combobox>
+                    <lightning-input class="modal-input" label="Expense name" value={newExpense.name} onchange={handleExpenseNameChange} maxlength="80" required></lightning-input>
+                    <lightning-input class="modal-input" type="number" label="Amount" value={newExpense.amount} min="0.01" step="0.01" onchange={handleExpenseAmountChange} required></lightning-input>
+                </div>
+                <footer class="slds-modal__footer"><lightning-button label="Cancel" onclick={closeExpenseModal}></lightning-button><lightning-button class="save-expense-button" variant="brand" label="Save expense" onclick={saveExpense} disabled={isSaving}></lightning-button></footer>
+            </div>
+        </section>
+        <div class="slds-backdrop slds-backdrop_open"></div>
+    </template>
+</template>
